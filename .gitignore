@@ -1,0 +1,13 @@
+# 忽略所有在 data/ 目录下的内容
+data/
+
+# 忽略Python的缓存文件
+__pycache__/
+*.pyc
+
+# 忽略虚拟环境文件夹 (如果使用)
+venv/
+.venv/
+env/
+.env
+
