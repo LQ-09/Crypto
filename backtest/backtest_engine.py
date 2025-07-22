@@ -19,7 +19,10 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min):
         'close': 'first',
         'signal': 'first'
     }).dropna()
-
+    
+    # 强制每个周期开始时平仓：将上一个周期的信号置为0
+    backtest_df['signal'] = backtest_df['signal'].shift(1).fillna(0)
+    
     # 2. 计算每个持仓周期（小时级）的收益率
     backtest_df['ret'] = backtest_df['close'].pct_change()
     # 3. 计算策略收益率 (用上一个周期的信号，乘以当前周期的收益)

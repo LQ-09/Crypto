@@ -1,6 +1,26 @@
 {
-    "factor_ma15": {
+    "factor_001": {
         "module": "backtest.factors",
-        "function": "factor_ma15"
+        "function": "factor_001"
+    },
+        "factor_002": {
+        "module": "backtest.factors",
+        "function": "factor_002"
+    },
+        "factor_003": {
+        "module": "backtest.factors",
+        "function": "factor_003"
+    },
+        "factor_004": {
+        "module": "backtest.factors",
+        "function": "factor_004"
+    },
+        "factor_005": {
+        "module": "backtest.factors",
+        "function": "factor_005"
+    },        
+        "factor_006": {
+        "module": "backtest.factors",
+        "function": "factor_006"
     }
 }

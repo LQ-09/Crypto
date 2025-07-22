@@ -13,7 +13,7 @@ sns.set_style('whitegrid')
 from backtest.utils import load_data_in_period, load_factors_from_config
 from backtest.data_download import fetch_binance_klines_min
 
-def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=0, quantile_window=1440):
+def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=0, quantile_window=1440, long_quantile=0.10, short_quantile=0.90):
     """
     对单个因子函数运行深度分析，并返回结果和用于绘图的数据。
     :param df: 1分钟原始数据
@@ -36,12 +36,12 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
     
     # 新增：基于滚动分位数的信号生成
     # 当因子值低于10%分位数时做多(信号为1)，高于90%分位数时做空(信号为-1)
-    df['q10'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(0.10)
-    df['q90'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(0.90)
+    df['q_low'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(long_quantile)
+    df['q_high'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(short_quantile)
     
     df['signal'] = 0.0
-    df.loc[df['factor'] <= df['q10'], 'signal'] = 1.0
-    df.loc[df['factor'] >= df['q90'], 'signal'] = -1.0
+    df.loc[df['factor'] <= df['q_low'], 'signal'] = 1.0
+    df.loc[df['factor'] >= df['q_high'], 'signal'] = -1.0
 
     # 4. 按换仓周期进行采样，只在换仓点进行分析
     # 使用resample确保我们只在每个周期的开始点（如整点）进行分析。
@@ -142,8 +142,6 @@ def plot_correlation_chart(correlation_series, factor_name, result_dir):
     save_path = os.path.join(result_dir, f'{factor_name}_correlation.png')
     plt.savefig(save_path)
     print(f"因子相关性图表已保存至: {save_path}")
-    plt.show()
-    plt.close()
 
 def plot_multi_period_pnl(pnl_data_by_period, factor_name, result_dir):
     """
@@ -171,9 +169,6 @@ def plot_multi_period_pnl(pnl_data_by_period, factor_name, result_dir):
     save_path = os.path.join(result_dir, f'{factor_name}_multi_period_pnl.png')
     plt.savefig(save_path)
     print(f"多周期 PnL 曲线图已保存至: {save_path}")
-
-    plt.show()  # 仍然在屏幕上显示图像
-    plt.close() # 关闭图像以释放内存，防止在循环中打开过多窗口
 
 def ensure_data_is_available(symbol, start_date_str, end_date_str, data_dir):
     """
@@ -216,13 +211,17 @@ def ensure_data_is_available(symbol, start_date_str, end_date_str, data_dir):
 # --- 因子原型开发区 (Factor Prototyping Area) ---
 # 在这里定义和测试您当前正在研究的新因子。
 def factor_to_test(df):
-    """一个示例因子，用于原型测试。该因子结合了价格方向和交易量。"""
-    direction = np.sign(df['close'].diff())
-    # 过去24分钟的方向性总和，乘以当前分钟的交易量
-    f = (direction).rolling(24).sum() * df['volume']
-    # 返回原始值，正值可能预示上涨，负值可能预示下跌
-    return f
-
+    volumes = df["volume"]
+    closes = df["close"]
+    opens = df['open']
+    lows = df["low"]
+    highs = df["high"]
+    trades = df["trades"]
+    n = 12 * 60
+ 
+    std_close = closes.rolling(120).std()
+    condition = std_close.where(closes > closes.shift(1), 0)
+    return condition.ewm(span=n, adjust=False).mean()
 
 if __name__ == '__main__':
     # ==============================================================================
@@ -231,12 +230,14 @@ if __name__ == '__main__':
     # 指定在原型区中要测试的因子函数
     FACTOR_TO_TEST = factor_to_test
     QUANTILE_WINDOW = 24 * 60    # 用于计算分位数信号的滚动窗口 (1440分钟 = 1天)
+    LONG_ENTRY_QUANTILE = 0.10   # 做多信号的因子值分位数阈值 (e.g., 0.10 for bottom 10%)
+    SHORT_ENTRY_QUANTILE = 0.90  # 做空信号的因子值分位数阈值 (e.g., 0.90 for top 10%)
 
     SYMBOL = 'BTCUSDT'
-    TRANSACTION_FEE_BPS = 2      # 用于计算净值夏普率的交易手续费（基点），设为0可以看得更清楚
+    TRANSACTION_FEE_BPS = 1     # 用于计算净值夏普率的交易手续费（基点），10个基点即0.1%
     REBALANCE_PERIODS_MIN = [60, 120, 180, 240] # 测试多个换仓周期
-    START_DATE = '2024-01-01'    # 回测开始日期
-    END_DATE = '2025-01-01'      # 回测结束日期 (包含当天)
+    START_DATE = '2025-01-01'    # 回测开始日期
+    END_DATE = '2025-06-01'      # 回测结束日期 (包含当天)
 
     # ==============================================================================
     # --- 2. 数据加载 ---
@@ -292,7 +293,8 @@ if __name__ == '__main__':
         for period in tqdm(REBALANCE_PERIODS_MIN, desc=f"Analyzing {FACTOR_TO_TEST.__name__}"):
             # 传入df.copy()确保每次分析都基于干净的原始数据
             analysis_results, detailed_df = run_single_factor_analysis(
-                df.copy(), FACTOR_TO_TEST, period, TRANSACTION_FEE_BPS, QUANTILE_WINDOW
+                df.copy(), FACTOR_TO_TEST, period, TRANSACTION_FEE_BPS, QUANTILE_WINDOW,
+                LONG_ENTRY_QUANTILE, SHORT_ENTRY_QUANTILE
             )
             all_results.append(analysis_results)
             pnl_data_for_plotting[period] = detailed_df
@@ -318,3 +320,7 @@ if __name__ == '__main__':
             plot_multi_period_pnl(pnl_data_for_plotting, FACTOR_TO_TEST.__name__, result_dir)
         else:
             print("错误：未能生成任何分析结果。")
+
+    # 在脚本末尾一次性显示所有已创建但未关闭的图表
+    print("\n分析完成。显示所有图表...")
+    plt.show()
