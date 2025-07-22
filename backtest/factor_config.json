@@ -1,0 +1,6 @@
+{
+    "factor_ma15": {
+        "module": "backtest.factors",
+        "function": "factor_ma15"
+    }
+}

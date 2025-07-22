@@ -1,11 +1,11 @@
 import os
 from datetime import datetime, timezone, timedelta
-from data_download import fetch_binance_klines_min
+from backtest.data_download import fetch_binance_klines_min
 # from backtest import run_backtest
 import pandas as pd
 from tqdm import tqdm
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.abspath(__file__))
 data_root = os.path.join(project_root, 'data')
 
 if __name__ == '__main__':
