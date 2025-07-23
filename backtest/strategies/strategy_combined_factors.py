@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from backtest.utils import load_factors_from_config
 
-def generate_signals(df, factor_config_path, quantile_window, long_quantile, short_quantile):
+def generate_signals(df, factor_config_path, quantile_window, long_quantile, short_quantile, std_window):
     """
     根据配置文件中的因子，等权相加后，基于滚动分位数生成交易信号。
     
@@ -21,6 +21,7 @@ def generate_signals(df, factor_config_path, quantile_window, long_quantile, sho
     :param quantile_window: 计算分位数的滚动窗口。
     :param long_quantile: 做多信号的分位数阈值。
     :param short_quantile: 做空信号的分位数阈值。
+    :param std_window: 因子标准化（Z-Score）的滚动窗口。
     :return: 带有 'signal' 列的DataFrame。
     """
     df_factors = pd.DataFrame(index=df.index)
@@ -39,9 +40,9 @@ def generate_signals(df, factor_config_path, quantile_window, long_quantile, sho
             # 为了让不同量纲的因子能被“等权”相加，标准化是必不可少的。
             # 它将每个因子的值都转换为相似的尺度，确保每个因子都有机会影响最终结果。
             # 这里使用滚动标准化(rolling z-score)来避免使用未来数据。窗口期可以根据因子特性调整。
-            rolling_window = 1440 # 使用过去24小时(1440分钟)的数据进行标准化
-            mean = factor_series.rolling(window=rolling_window, min_periods=60).mean()
-            std = factor_series.rolling(window=rolling_window, min_periods=60).std()
+            # 使用更稳健的min_periods，例如窗口的1/24，而不是硬编码的60
+            mean = factor_series.rolling(window=std_window, min_periods=max(1, std_window // 24)).mean()
+            std = factor_series.rolling(window=std_window, min_periods=max(1, std_window // 24)).std()
             factor_series = (factor_series - mean) / std
             
             df_factors[name] = factor_series

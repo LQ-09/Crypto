@@ -12,13 +12,16 @@ SYMBOL = 'ETHUSDT'
 START_DATE = '2025-01-01'
 END_DATE = '2025-06-01'
 INITIAL_CAPITAL = 2000
-TRANSACTION_FEE_BPS = 0   # 手续费 (bps), e.g., 2 bps = 0.02%
-REBALANCE_PERIOD_MIN = 60 # 换仓周期（分钟）
+TRANSACTION_FEE_BPS = 10   # 手续费 (bps), e.g., 10 bps = 0.1%
+REBALANCE_PERIOD_MIN = 720 # 换仓周期（分钟）, 720分钟 = 12小时
 
 # 新增：交易信号生成阈值 (与因子分析脚本对齐)
 QUANTILE_WINDOW = 24 * 60    # 用于计算分位数信号的滚动窗口 (1440分钟 = 1天)
 LONG_ENTRY_QUANTILE = 0.10   # 做多信号的因子值分位数阈值 (e.g., 0.10 for bottom 10%)
 SHORT_ENTRY_QUANTILE = 0.90  # 做空信号的因子值分位数阈值 (e.g., 0.90 for top 10%)
+
+# 新增：因子标准化窗口
+FACTOR_STD_WINDOW = 24 * 60  # 用于计算因子Z-Score的滚动窗口 (1440分钟 = 1天)
 
 # 新增：最大杠杆/仓位。策略的实际仓位 = 信号强度 * LEVERAGE
 LEVERAGE = 1.0 # 1.0 表示最强信号时开满仓，0.5表示最强信号时开半仓
@@ -52,7 +55,8 @@ if __name__ == '__main__':
             config_path,
             QUANTILE_WINDOW,
             LONG_ENTRY_QUANTILE,
-            SHORT_ENTRY_QUANTILE
+            SHORT_ENTRY_QUANTILE,
+            FACTOR_STD_WINDOW
         )
 
         # 4. 将带信号的数据送入回测引擎

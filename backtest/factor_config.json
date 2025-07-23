@@ -18,9 +18,5 @@
         "factor_005": {
         "module": "backtest.factors",
         "function": "factor_005"
-    },        
-        "factor_006": {
-        "module": "backtest.factors",
-        "function": "factor_006"
     }
 }

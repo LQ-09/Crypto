@@ -75,21 +75,21 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
 
     # 5.5 计算胜率 (Win Rate)
     # 胜率定义为：做多（因子值为正）时未来收益为正的比例，加上做空（因子值为负）时未来收益为负的比例。
-    # 使用上一周期的信号作为本周期的持仓
-    trade_signal = analysis_df['signal'].shift(1)
+    # 使用本周期的信号，因为它决定了本周期未来收益（future_ret）的交易方向
+    trade_signal = analysis_df['signal']
     
     # 识别出做多和做空的周期
     long_trades = trade_signal > 0
     short_trades = trade_signal < 0
     
     # 计算获胜的交易数量
-    wins = (long_trades & (analysis_df['future_ret'] > 0)).sum() + (short_trades & (analysis_df['future_ret'] < 0)).sum()
+    wins = ((long_trades & (analysis_df['future_ret'] > 0)) | (short_trades & (analysis_df['future_ret'] < 0))).sum()
     total_trades = (long_trades | short_trades).sum()
     win_rate = wins / total_trades if total_trades > 0 else 0
 
     # 6. 计算因子夏普率 (Factor Sharpe) - 基于新的交易规则
-    # 6.1 因子收益率（毛利），持仓为-1, 0, 1
-    analysis_df['factor_return'] = analysis_df['signal'].shift(1) * analysis_df['future_ret']
+    # 6.1 因子收益率（毛利）。信号在当前周期初生成，对应当前周期的未来收益 future_ret
+    analysis_df['factor_return'] = analysis_df['signal'] * analysis_df['future_ret']
     
     # 6.2 计算交易成本 (与持仓变化成正比)
     # 更新：与策略回测引擎的成本计算逻辑对齐 (每期都重新开仓)
@@ -193,34 +193,34 @@ def plot_multi_period_pnl(pnl_data_by_period, factor_name, ax):
 
 # --- 因子原型开发区 (Factor Prototyping Area) ---
 # 在这里定义和测试您当前正在研究的新因子。
-def factor_to_test(df):
-    volumes = df["volume"]
-    closes = df["close"]
+def factor_006(df):
+    volumes = df['volume']
+    bidVolumes = df['bid_volume']
+    lows = df['low']
+    highs = df['high']
     opens = df['open']
-    lows = df["low"]
-    highs = df["high"]
-    trades = df["trades"]
-    n = 12 * 60
- 
-    ret = closes/closes.shift(1) - 1
-    weighted_ret = ret.ewm(span=n, adjust=False).mean()
-    f = weighted_ret.pct_change()
-    return  - f * volumes.pct_change()
+    closes = df['close']
+    n = 60
+
+    high_open_ratio = (highs - opens) / (highs - lows + 1e-9)  # 避免除零
+    signal = closes.where(high_open_ratio > 0.8,-closes)
+    f = signal * volumes
+    return f.rolling(n).mean()
 
 if __name__ == '__main__':
     # ==============================================================================
     # --- 1. 配置区 ---
     # ==============================================================================
     # 指定在原型区中要测试的因子函数
-    FACTOR_TO_TEST = factor_to_test
+    FACTOR_TO_TEST = factor_006
     QUANTILE_WINDOW = 24 * 60    # 用于计算分位数信号的滚动窗口 (1440分钟 = 1天)
     LONG_ENTRY_QUANTILE = 0.10   # 做多信号的因子值分位数阈值 (e.g., 0.10 for bottom 10%)
     SHORT_ENTRY_QUANTILE = 0.90  # 做空信号的因子值分位数阈值 (e.g., 0.90 for top 10%)
 
-    SYMBOL = 'BTCUSDT'
+    SYMBOL = 'ETHUSDT'
     TRANSACTION_FEE_BPS = 10     # 用于计算净值夏普率的交易手续费（基点），10个基点即0.1%
-    REBALANCE_PERIODS_MIN = [60, 120, 180, 240] # 测试多个换仓周期
-    START_DATE = '2025-01-01'    # 回测开始日期
+    REBALANCE_PERIODS_MIN = [360, 720, 1440] # 测试12小时和24小时换仓周期
+    START_DATE = '2024-01-01'    # 回测开始日期
     END_DATE = '2025-06-01'      # 回测结束日期 (包含当天)
 
     # ==============================================================================
@@ -283,22 +283,23 @@ if __name__ == '__main__':
             all_results.append(analysis_results)
             pnl_data_for_plotting[period] = detailed_df
 
-        # 合并结果并筛选出60分钟周期的结果进行展示
+        # 合并结果并筛选出第一个周期的结果进行展示
         if all_results:
             final_results_df = pd.concat(all_results, ignore_index=True)
 
-            # 安全地筛选60分钟周期的结果
-            result_60min = final_results_df[final_results_df['Period (min)'] == 60].copy()
+            # 安全地筛选第一个周期的结果进行展示
+            first_period_to_show = REBALANCE_PERIODS_MIN[-1]
+            result_first_period = final_results_df[final_results_df['Period (min)'] == first_period_to_show].copy()
 
-            print(f"\n--- {FACTOR_TO_TEST.__name__} 在 60min 周期下的核心指标 ---")
+            print(f"\n--- {FACTOR_TO_TEST.__name__} 在 {first_period_to_show}min 周期下的核心指标 ---")
             print(f"交易手续费: {TRANSACTION_FEE_BPS} bps ({TRANSACTION_FEE_BPS/10000.0:.4f})")
 
-            if not result_60min.empty:
+            if not result_first_period.empty:
                 # 在打印前移除 Period (min) 列以保持输出简洁
-                result_to_print = result_60min.drop(columns=['Period (min)'])
+                result_to_print = result_first_period.drop(columns=['Period (min)'])
                 print(result_to_print.to_string(index=False))
             else:
-                print("未能找到 60min 周期的分析结果。请确保 60 在 REBALANCE_PERIODS_MIN 配置中。")
+                print(f"未能找到 {first_period_to_show}min 周期的分析结果。请确保 {first_period_to_show} 在 REBALANCE_PERIODS_MIN 配置中。")
 
             # --- 整合绘图 ---
             print("\n--- 正在生成整合分析图表 ---")
@@ -312,9 +313,9 @@ if __name__ == '__main__':
             # 1. 绘制相关性图
             plot_correlation_chart(correlation_series, FACTOR_TO_TEST.__name__, ax1)
 
-            # 2. 绘制毛利vs净利对比图 (使用60min周期数据)
-            df_60min_pnl = pnl_data_for_plotting.get(60)
-            plot_gross_vs_net_pnl(df_60min_pnl, FACTOR_TO_TEST.__name__, 60, ax2)
+            # 2. 绘制毛利vs净利对比图 (使用第一个周期数据)
+            df_first_period_pnl = pnl_data_for_plotting.get(first_period_to_show)
+            plot_gross_vs_net_pnl(df_first_period_pnl, FACTOR_TO_TEST.__name__, first_period_to_show, ax2)
 
             # 3. 绘制多周期对比图
             plot_multi_period_pnl(pnl_data_for_plotting, FACTOR_TO_TEST.__name__, ax3)
