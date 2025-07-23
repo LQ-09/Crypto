@@ -13,7 +13,7 @@ START_DATE = '2025-01-01'
 END_DATE = '2025-06-01'
 INITIAL_CAPITAL = 2000
 TRANSACTION_FEE_BPS = 10   # 手续费 (bps), e.g., 10 bps = 0.1%
-REBALANCE_PERIOD_MIN = 720 # 换仓周期（分钟）, 720分钟 = 12小时
+REBALANCE_PERIOD_MIN = 1440 # 换仓周期（分钟）, 1440分钟 = 24小时
 
 # 新增：交易信号生成阈值 (与因子分析脚本对齐)
 QUANTILE_WINDOW = 24 * 60    # 用于计算分位数信号的滚动窗口 (1440分钟 = 1天)
@@ -61,7 +61,8 @@ if __name__ == '__main__':
 
         # 4. 将带信号的数据送入回测引擎
         print("\n开始回测...")
-        results = run_backtest(
+        # 注意：假设 run_backtest 已修改为返回 (results, backtest_df)
+        results, backtest_df = run_backtest(
             df_with_signals,
             INITIAL_CAPITAL,
             TRANSACTION_FEE_BPS,
@@ -76,14 +77,61 @@ if __name__ == '__main__':
         print(f"最大回撤: {results['max_drawdown']:.2%}")
         print(f"胜率: {results['win_rate']:.2%}")
 
-        # 6. 绘制并保存累计收益曲线图
+        # 6. 绘制并保存累计收益曲线图 (简化版)
         print("\n正在生成累计收益曲线图...")
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(14, 8))
         results['cumulative_returns'].plot(title=f'Strategy Cumulative Returns - {SYMBOL}', grid=True)
         plt.xlabel('Date')
         plt.ylabel('Cumulative Return')
+        plt.tight_layout()
         
         save_path = os.path.join(result_dir, f'strategy_pnl_{SYMBOL}_{START_DATE}_to_{END_DATE}.png')
         plt.savefig(save_path)
         print(f"累计收益曲线图已保存至: {save_path}")
         plt.show()
+
+        # 7. 新增：因子贡献度归因分析 (PnL Attribution)
+        print("\n--- 正在生成因子贡献度归因分析图 ---")
+        
+        # 7.1 识别出所有标准化后的独立因子列
+        factor_std_cols = [col for col in df_with_signals.columns if col.startswith('factor_std_')]
+        
+        if not factor_std_cols:
+            print("未找到标准化后的独立因子列 (以 'factor_std_' 开头)，跳过归因分析。")
+        else:
+            # 7.2 计算每个因子的独立 PnL 贡献
+            # 核心思想: 每个因子的(毛利)贡献 ≈ 它的标准化因子值 * 周期回报
+            # 这是一个行业内常用的近似归因方法，能有效反映各因子贡献方向和大小。
+            
+            pnl_attribution = pd.DataFrame(index=backtest_df.index)
+            
+            # 将 backtest_df 中的 period_return 合并过来，确保时间对齐
+            aligned_df = df_with_signals.join(backtest_df['period_return'], how='right')
+
+            for col in factor_std_cols:
+                factor_name = col.replace('factor_std_', '')
+                # 因子贡献 = 上一期的因子值 * 本期的回报率
+                # 这里我们不考虑杠杆和手续费，只看毛利贡献，以评估因子原始能力
+                pnl_attribution[f'{factor_name}_contrib'] = aligned_df[col].shift(1) * aligned_df['period_return']
+
+            # 7.3 计算累计贡献
+            # 我们这里计算的是每个因子贡献的累加值，而不是复利曲线，这样更容易看出绝对贡献大小
+            cumulative_attribution = pnl_attribution.cumsum()
+
+            # 7.4 绘图
+            plt.figure(figsize=(14, 8))
+            
+            # 绘制每个因子的累计贡献曲线
+            cumulative_attribution.plot(ax=plt.gca(), colormap='viridis')
+            
+            plt.title(f'PnL Attribution by Factor - {SYMBOL}')
+            plt.xlabel('Date')
+            plt.ylabel('Cumulative Contribution (Gross PnL)')
+            plt.legend(title='Factor Contribution')
+            plt.grid(True)
+            plt.tight_layout()
+            
+            save_path = os.path.join(result_dir, f'pnl_attribution_{SYMBOL}_{START_DATE}_to_{END_DATE}.png')
+            plt.savefig(save_path)
+            print(f"因子贡献度归因图已保存至: {save_path}")
+            plt.show()

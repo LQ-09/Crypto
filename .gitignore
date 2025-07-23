@@ -1,6 +1,10 @@
 # 忽略所有在 data/ 目录下的内容
 data/
 
+# 忽略回测结果图表和报告
+backtest/factor_result/
+backtest/strategy_result/
+
 # 忽略Python的缓存文件
 __pycache__/
 *.pyc
@@ -10,4 +14,3 @@ venv/
 .venv/
 env/
 .env
-

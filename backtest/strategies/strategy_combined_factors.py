@@ -45,12 +45,14 @@ def generate_signals(df, factor_config_path, quantile_window, long_quantile, sho
             std = factor_series.rolling(window=std_window, min_periods=max(1, std_window // 24)).std()
             factor_series = (factor_series - mean) / std
             
-            df_factors[name] = factor_series
+            # 使用 'factor_std_' 前缀，以便在主DataFrame中轻松识别它们，并为后续归因分析做准备
+            df_factors[f'factor_std_{name}'] = factor_series
         except Exception as e:
             print(f"计算因子 {name} 时出错: {e}")
 
-    # 2. 等权相加 (fillna(0)可以处理计算初期的NaN，以及某些因子在某些点上无值的情况)
-    df['combined_factor'] = df_factors.sum(axis=1, skipna=True).fillna(0)
+    # 2. 将所有标准化后的因子合并回主DataFrame，并计算组合因子
+    df = df.join(df_factors)
+    df['combined_factor'] = df.filter(like='factor_std_').sum(axis=1, skipna=True).fillna(0)
     
     # 3. 计算交易信号的动态边界
     # q_low/q_high 是开仓的“门槛”
@@ -83,7 +85,5 @@ def generate_signals(df, factor_config_path, quantile_window, long_quantile, sho
     
     # 5. 信号延迟一期生效，避免使用未来数据
     df['signal'] = df['signal'].shift(1).fillna(0)
-    
-    print(f"多因子组合策略信号已生成。信号分布:\n{df['signal'].value_counts(normalize=True).round(2)}")
     
     return df

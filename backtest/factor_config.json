@@ -11,7 +11,7 @@
         "module": "backtest.factors",
         "function": "factor_003"
     },
-        "factor_004": {
+            "factor_004": {
         "module": "backtest.factors",
         "function": "factor_004"
     },
