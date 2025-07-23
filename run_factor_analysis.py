@@ -35,14 +35,29 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
     # 3. 在完整的1分钟数据上计算因子值
     df['factor'] = factor_func(df)
     
-    # 新增：基于滚动分位数的信号生成
-    # 当因子值低于10%分位数时做多(信号为1)，高于90%分位数时做空(信号为-1)
+    # 更新：基于滚动分位数的动态信号生成 (与策略回测逻辑对齐)
+    # 3.1 计算交易信号的动态边界
     df['q_low'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(long_quantile)
     df['q_high'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(short_quantile)
+    df['q_min'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(0.01)
+    df['q_max'] = df['factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(0.99)
     
     df['signal'] = 0.0
-    df.loc[df['factor'] <= df['q_low'], 'signal'] = 1.0
-    df.loc[df['factor'] >= df['q_high'], 'signal'] = -1.0
+
+    # 3.2 计算动态仓位
+    long_cond = df['factor'] <= df['q_low']
+    long_numerator = df['q_low'] - df['factor']
+    long_denominator = df['q_low'] - df['q_min']
+    long_denominator.replace(0, np.nan, inplace=True)
+    long_strength = (long_numerator / long_denominator).clip(0, 1)
+    df.loc[long_cond, 'signal'] = long_strength
+
+    short_cond = df['factor'] >= df['q_high']
+    short_numerator = df['factor'] - df['q_high']
+    short_denominator = df['q_max'] - df['q_high']
+    short_denominator.replace(0, np.nan, inplace=True)
+    short_strength = (short_numerator / short_denominator).clip(0, 1)
+    df.loc[short_cond, 'signal'] = -short_strength
 
     # 4. 按换仓周期进行采样，只在换仓点进行分析
     # 使用resample确保我们只在每个周期的开始点（如整点）进行分析。
@@ -50,7 +65,7 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
         'factor': 'first',      # 取10:00的因子值
         'signal': 'first',      # 取10:00的交易信号
         'future_ret': 'first'   # 取10:00时计算的未来60分钟收益
-    }).dropna()
+    }).fillna({'signal': 0}).dropna(subset=['factor', 'future_ret']) # 填充信号中的NaN并保留有效数据
 
     # 5. 计算IC、Rank IC 和 因子换手率 (Turnover)
     ic = analysis_df[['factor', 'future_ret']].corr().iloc[0, 1]
@@ -77,8 +92,9 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
     analysis_df['factor_return'] = analysis_df['signal'].shift(1) * analysis_df['future_ret']
     
     # 6.2 计算交易成本 (与持仓变化成正比)
-    position_change = analysis_df['signal'].diff().abs()
-    transaction_costs = position_change * fee_rate
+    # 更新：与策略回测引擎的成本计算逻辑对齐 (每期都重新开仓)
+    prev_signal = analysis_df['signal'].shift(1).fillna(0)
+    transaction_costs = (prev_signal.abs() + analysis_df['signal'].abs()) * fee_rate
     analysis_df['net_factor_return'] = analysis_df['factor_return'] - transaction_costs
 
     # 6.4 计算年化夏普率

@@ -9,11 +9,11 @@ def generate_signals(df, factor_config_path, quantile_window, long_quantile, sho
     策略逻辑:
     1. 从 JSON 配置文件加载所有因子函数。
     2. 计算所有因子的值，并进行滚动标准化，然后等权相加得到一个综合因子。
-    3. 计算综合因子的滚动分位数，作为动态的交易阈值。
-    4. 生成交易信号 (与因子分析脚本逻辑对齐):
-       - combined_factor <= q_low: 做多 (signal = 1)
-       - combined_factor >= q_high: 做空 (signal = -1)
-       - 否则: 空仓 (signal = 0)
+    3. 计算综合因子的滚动分位数，定义交易区间。
+    4. **新增：根据因子值在交易区间内的相对强度，计算动态仓位。**
+       - 信号强度与因子值超过开仓阈值的程度成正比。
+       - 例如，因子值越接近分布的底部，做多仓位越大（趋近于1）。
+       - 因子值越接近分布的顶部，做空仓位越大（趋近于-1）。
     5. 信号延迟一期生效，以避免使用未来数据。
 
     :param df: 包含OHLCV数据的DataFrame。
@@ -51,18 +51,36 @@ def generate_signals(df, factor_config_path, quantile_window, long_quantile, sho
     # 2. 等权相加 (fillna(0)可以处理计算初期的NaN，以及某些因子在某些点上无值的情况)
     df['combined_factor'] = df_factors.sum(axis=1, skipna=True).fillna(0)
     
-    # 3. 根据滚动分位数生成交易信号 (新逻辑，与因子分析对齐)
-    # 仅当组合因子值足够极端时才产生信号，可以有效过滤噪音，减少不必要的交易。
+    # 3. 计算交易信号的动态边界
+    # q_low/q_high 是开仓的“门槛”
     df['q_low'] = df['combined_factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(long_quantile)
     df['q_high'] = df['combined_factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(short_quantile)
+    # q_min/q_max 定义了仓位从0到100%的完整区间，使用1%和99%分位数比直接用min/max更稳健，可以避免极端异常值的干扰。
+    df['q_min'] = df['combined_factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(0.01)
+    df['q_max'] = df['combined_factor'].rolling(window=quantile_window, min_periods=quantile_window // 2).quantile(0.99)
     
     df['signal'] = 0.0
-    # 当组合因子值低于下分位数时，我们认为这是强烈的买入信号
-    df.loc[df['combined_factor'] <= df['q_low'], 'signal'] = 1.0
-    # 当组合因子值高于上分位数时，我们认为这是强烈的卖出信号
-    df.loc[df['combined_factor'] >= df['q_high'], 'signal'] = -1.0
+
+    # 4. 计算动态仓位
+    # 做多仓位：当因子值低于开仓阈值(q_low)时
+    long_cond = df['combined_factor'] <= df['q_low']
+    long_numerator = df['q_low'] - df['combined_factor']
+    long_denominator = df['q_low'] - df['q_min']
+    long_denominator.replace(0, np.nan, inplace=True) # 避免除以零
+    long_strength = (long_numerator / long_denominator).clip(0, 1) # 归一化并限制在[0, 1]
+    df.loc[long_cond, 'signal'] = long_strength
+
+    # 做空仓位：当因子值高于开仓阈值(q_high)时
+    short_cond = df['combined_factor'] >= df['q_high']
+    short_numerator = df['combined_factor'] - df['q_high']
+    short_denominator = df['q_max'] - df['q_high']
+    short_denominator.replace(0, np.nan, inplace=True) # 避免除以零
+    short_strength = (short_numerator / short_denominator).clip(0, 1) # 归一化并限制在[0, 1]
+    df.loc[short_cond, 'signal'] = -short_strength
     
-    # 4. 信号延迟一期生效，避免使用未来数据
+    df['signal'] = df['signal'].fillna(0) # 将计算中可能出现的NaN填充为0
+    
+    # 5. 信号延迟一期生效，避免使用未来数据
     df['signal'] = df['signal'].shift(1).fillna(0)
     
     print(f"多因子组合策略信号已生成。信号分布:\n{df['signal'].value_counts(normalize=True).round(2)}")

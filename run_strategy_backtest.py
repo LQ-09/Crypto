@@ -8,17 +8,20 @@ from backtest.backtest_engine import run_backtest
 from backtest.utils import load_data_in_period, ensure_data_is_available # 统一使用工具函数
 
 # --- 配置区 (与因子分析脚本保持相似结构) ---
-SYMBOL = 'BTCUSDT'
+SYMBOL = 'ETHUSDT'
 START_DATE = '2025-01-01'
 END_DATE = '2025-06-01'
-INITIAL_CAPITAL = 100000
-TRANSACTION_FEE_BPS = 10   # 手续费 (bps), e.g., 2 bps = 0.02%
+INITIAL_CAPITAL = 2000
+TRANSACTION_FEE_BPS = 0   # 手续费 (bps), e.g., 2 bps = 0.02%
 REBALANCE_PERIOD_MIN = 60 # 换仓周期（分钟）
 
 # 新增：交易信号生成阈值 (与因子分析脚本对齐)
 QUANTILE_WINDOW = 24 * 60    # 用于计算分位数信号的滚动窗口 (1440分钟 = 1天)
 LONG_ENTRY_QUANTILE = 0.10   # 做多信号的因子值分位数阈值 (e.g., 0.10 for bottom 10%)
 SHORT_ENTRY_QUANTILE = 0.90  # 做空信号的因子值分位数阈值 (e.g., 0.90 for top 10%)
+
+# 新增：最大杠杆/仓位。策略的实际仓位 = 信号强度 * LEVERAGE
+LEVERAGE = 1.0 # 1.0 表示最强信号时开满仓，0.5表示最强信号时开半仓
 
 # --- 路径配置 (与因子分析脚本保持一致) ---
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +61,8 @@ if __name__ == '__main__':
             df_with_signals,
             INITIAL_CAPITAL,
             TRANSACTION_FEE_BPS,
-            REBALANCE_PERIOD_MIN
+            REBALANCE_PERIOD_MIN,
+            leverage=LEVERAGE
         )
 
         # 5. 打印和可视化结果 (与因子分析脚本的输出风格统一)

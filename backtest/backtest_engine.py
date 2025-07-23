@@ -1,13 +1,14 @@
 import pandas as pd
 import numpy as np
 
-def run_backtest(df_with_signals, initial_capital, fee_bps, period_min):
+def run_backtest(df_with_signals, initial_capital, fee_bps, period_min, leverage=1.0):
     """
     一个简单的向量化回测引擎，适配指定换仓周期。
     :param df_with_signals: 必须包含 'close' 和 'signal' 列的DataFrame。
     :param initial_capital: 初始资金。
     :param fee_bps: 单边交易手续费（基点）。
     :param period_min: 换仓周期（分钟）。
+    :param leverage: 杠杆/仓位乘数。
     :return: 包含回测结果的字典。
     """
     df = df_with_signals.copy()
@@ -15,7 +16,7 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min):
     
     # 1. 按换仓周期进行采样
     # 策略文件生成的signal已经是t-1时刻的信号，决定t时刻的持仓
-    backtest_df = df.resample(f'{period_min}T').agg({
+    backtest_df = df.resample(f'{period_min}min').agg({
         'close': 'first',
         'signal': 'first'
     }).dropna()
@@ -24,16 +25,15 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min):
     backtest_df['ret'] = backtest_df['close'].pct_change()
     
     # 3. 计算策略毛收益 (信号在策略文件中已经shift(1)，所以这里直接使用)
-    backtest_df['strategy_ret'] = backtest_df['signal'] * backtest_df['ret']
+    # 策略收益 = 信号强度 * 资产收益 * 杠杆
+    backtest_df['strategy_ret'] = backtest_df['signal'] * backtest_df['ret'] * leverage
     
     # 4. 计算交易成本 (核心修正)
     # 逻辑：每个周期都必须先平掉上期仓位，再开立本期新仓位。
     # 上一期的仓位信号
     prev_signal = backtest_df['signal'].shift(1).fillna(0)
     # 总交易成本 = 平掉上期仓位的成本 + 开立本期仓位的成本
-    # 例如: 上期为1(多)，本期为-1(空)。交易量为 abs(1)平仓 + abs(-1)开仓 = 2倍仓位
-    # 例如: 上期为1(多)，本期为1(多)。交易量为 abs(1)平仓 + abs(1)开仓 = 2倍仓位
-    total_traded_ratio = prev_signal.abs() + backtest_df['signal'].abs()
+    total_traded_ratio = (prev_signal.abs() + backtest_df['signal'].abs()) * leverage
     backtest_df['costs'] = total_traded_ratio * fee_rate
     
     # 5. 计算净收益
