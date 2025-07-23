@@ -5,6 +5,7 @@ from tqdm import tqdm
 from datetime import datetime, timedelta, timezone
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.gridspec as gridspec
 
 # 设置绘图风格
 sns.set_style('whitegrid')
@@ -86,6 +87,7 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
 
     # 7. 计算最大回撤 (Max Drawdown)
     # 7.1 计算累计净收益曲线 (也用于后续绘图)
+    analysis_df['cumulative_gross_pnl'] = (1 + analysis_df['factor_return'].fillna(0)).cumprod()
     analysis_df['cumulative_pnl'] = (1 + analysis_df['net_factor_return'].fillna(0)).cumprod()
     # 7.2 计算滚动最大值
     running_max = analysis_df['cumulative_pnl'].cummax()
@@ -113,62 +115,65 @@ def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=
 
     return pd.DataFrame([results]), analysis_df
 
-def plot_correlation_chart(correlation_series, factor_name, result_dir):
+def plot_correlation_chart(correlation_series, factor_name, ax):
     """
-    绘制并保存新因子与已归档因子相关性的柱状图。
+    在指定的Axes上绘制新因子与已归档因子相关性的柱状图。
     :param correlation_series: 包含相关性数据的Pandas Series
     :param factor_name: 新因子的名称
-    :param result_dir: 保存图片的目录
+    :param ax: Matplotlib Axes object to draw on
     """
-    if correlation_series.empty:
-        print("没有可用于绘制相关性图表的已归档因子。")
+    if correlation_series is None or correlation_series.empty:
+        ax.text(0.5, 0.5, 'No archived factors to compare', ha='center', va='center', fontsize=12, color='grey')
+        ax.set_title(f'Correlation of "{factor_name}"')
         return
 
-    plt.figure(figsize=(10, 6))
     # 为正负相关性设置不同颜色，使其更直观
     colors = ['#4CAF50' if x > 0 else '#F44336' for x in correlation_series.values]
-    bars = plt.bar(correlation_series.index, correlation_series.values, color=colors)
+    bars = ax.bar(correlation_series.index, correlation_series.values, color=colors)
 
     # 在柱状图上显示数值
-    plt.bar_label(bars, fmt='%.3f', padding=3)
+    ax.bar_label(bars, fmt='%.3f', padding=3)
 
-    plt.title(f'Correlation of "{factor_name}" with Archived Factors', fontsize=16)
-    plt.ylabel('Correlation Coefficient')
-    plt.xticks(rotation=45, ha="right")
-    plt.ylim(min(correlation_series.min() * 1.2, -1.05), max(correlation_series.max() * 1.2, 1.05)) # 动态调整Y轴范围
-    plt.axhline(0, color='grey', linewidth=0.8) # 在0处画一条线
-    plt.tight_layout() # 调整布局防止标签重叠
+    ax.set_title(f'Correlation of "{factor_name}" with Archived Factors')
+    ax.set_ylabel('Correlation Coefficient')
+    ax.tick_params(axis='x', rotation=45)
+    ax.set_ylim(min(correlation_series.min() * 1.2, -1.05), max(correlation_series.max() * 1.2, 1.05))
+    ax.axhline(0, color='grey', linewidth=0.8)
 
-    save_path = os.path.join(result_dir, f'{factor_name}_correlation.png')
-    plt.savefig(save_path)
-    print(f"因子相关性图表已保存至: {save_path}")
-
-def plot_multi_period_pnl(pnl_data_by_period, factor_name, result_dir):
+def plot_gross_vs_net_pnl(df_period, factor_name, period_min, ax):
     """
-    绘制单个因子在多个周期下的累计PnL曲线，并保存。
+    在指定的Axes上绘制毛收益与净收益的对比曲线。
+    """
+    if df_period is None or df_period.empty:
+        ax.text(0.5, 0.5, 'No data for this period', ha='center', va='center', fontsize=12, color='grey')
+        ax.set_title(f'Gross vs Net PnL (Period: {period_min} min)')
+        return
+
+    df_period['cumulative_gross_pnl'].plot(label='Gross PnL (w/o fee)', ax=ax, color='skyblue')
+    df_period['cumulative_pnl'].plot(label='Net PnL (w/ fee)', ax=ax, color='orangered')
+    ax.set_title(f'Gross vs Net PnL (Period: {period_min} min)')
+    ax.set_ylabel('Cumulative Return')
+    ax.legend()
+    ax.grid(True)
+
+def plot_multi_period_pnl(pnl_data_by_period, factor_name, ax):
+    """
+    在指定的Axes上绘制多个周期下的累计PnL曲线。
     :param pnl_data_by_period: 字典，key为周期(分钟), value为包含'cumulative_pnl'的DataFrame
     :param factor_name: 因子名称
-    :param result_dir: 保存图片的目录
+    :param ax: Matplotlib Axes object to draw on
     """
-    # 确保结果目录存在
-    plt.figure(figsize=(15, 8))
-
     # 使用colormap来自动分配不同颜色，视觉效果更好
     colors = plt.cm.viridis(np.linspace(0, 1, len(pnl_data_by_period)))
 
     for (period, df), color in zip(pnl_data_by_period.items(), colors):
-        df['cumulative_pnl'].plot(label=f'Period: {period} min', color=color)
+        df['cumulative_pnl'].plot(label=f'Period: {period} min', ax=ax, color=color)
 
-    plt.title(f'Multi-Period PnL Curve for Factor: {factor_name}', fontsize=16)
-    plt.xlabel('Date')
-    plt.ylabel('Cumulative Return')
-    plt.legend()
-    plt.grid(True)
-
-    # 保存图像
-    save_path = os.path.join(result_dir, f'{factor_name}_multi_period_pnl.png')
-    plt.savefig(save_path)
-    print(f"多周期 PnL 曲线图已保存至: {save_path}")
+    ax.set_title(f'Multi-Period Net PnL Curve for Factor: {factor_name}')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Cumulative Return')
+    ax.legend()
+    ax.grid(True)
 
 def ensure_data_is_available(symbol, start_date_str, end_date_str, data_dir):
     """
@@ -219,9 +224,10 @@ def factor_to_test(df):
     trades = df["trades"]
     n = 12 * 60
  
-    std_close = closes.rolling(120).std()
-    condition = std_close.where(closes > closes.shift(1), 0)
-    return condition.ewm(span=n, adjust=False).mean()
+    ret = closes/closes.shift(1) - 1
+    weighted_ret = ret.ewm(span=n, adjust=False).mean()
+    f = weighted_ret.pct_change()
+    return  - f * volumes.pct_change()
 
 if __name__ == '__main__':
     # ==============================================================================
@@ -234,7 +240,7 @@ if __name__ == '__main__':
     SHORT_ENTRY_QUANTILE = 0.90  # 做空信号的因子值分位数阈值 (e.g., 0.90 for top 10%)
 
     SYMBOL = 'BTCUSDT'
-    TRANSACTION_FEE_BPS = 1     # 用于计算净值夏普率的交易手续费（基点），10个基点即0.1%
+    TRANSACTION_FEE_BPS = 10     # 用于计算净值夏普率的交易手续费（基点），10个基点即0.1%
     REBALANCE_PERIODS_MIN = [60, 120, 180, 240] # 测试多个换仓周期
     START_DATE = '2025-01-01'    # 回测开始日期
     END_DATE = '2025-06-01'      # 回测结束日期 (包含当天)
@@ -277,8 +283,8 @@ if __name__ == '__main__':
         if not factor_values_df.empty and len(factor_values_df.columns) > 1:
             correlation_matrix = factor_values_df.corr()
             correlation_series = correlation_matrix[FACTOR_TO_TEST.__name__].drop(FACTOR_TO_TEST.__name__)
-            plot_correlation_chart(correlation_series, FACTOR_TO_TEST.__name__, result_dir)
         else:
+            correlation_series = None # 如果无法计算，则设为None
             print("因子数量不足（少于2个），无法计算相关性。")
 
     # ==============================================================================
@@ -316,8 +322,31 @@ if __name__ == '__main__':
             else:
                 print("未能找到 60min 周期的分析结果。请确保 60 在 REBALANCE_PERIODS_MIN 配置中。")
 
-            # 为当前因子绘制多周期对比图
-            plot_multi_period_pnl(pnl_data_for_plotting, FACTOR_TO_TEST.__name__, result_dir)
+            # --- 整合绘图 ---
+            print("\n--- 正在生成整合分析图表 ---")
+            fig = plt.figure(figsize=(18, 12))
+            gs = gridspec.GridSpec(2, 2, figure=fig)
+
+            ax1 = fig.add_subplot(gs[0, 0])
+            ax2 = fig.add_subplot(gs[0, 1])
+            ax3 = fig.add_subplot(gs[1, :])
+
+            # 1. 绘制相关性图
+            plot_correlation_chart(correlation_series, FACTOR_TO_TEST.__name__, ax1)
+
+            # 2. 绘制毛利vs净利对比图 (使用60min周期数据)
+            df_60min_pnl = pnl_data_for_plotting.get(60)
+            plot_gross_vs_net_pnl(df_60min_pnl, FACTOR_TO_TEST.__name__, 60, ax2)
+
+            # 3. 绘制多周期对比图
+            plot_multi_period_pnl(pnl_data_for_plotting, FACTOR_TO_TEST.__name__, ax3)
+
+            fig.suptitle(f'Comprehensive Analysis for Factor: {FACTOR_TO_TEST.__name__}', fontsize=20)
+            plt.tight_layout(rect=[0, 0.03, 1, 0.97]) # 调整布局以适应主标题
+            
+            save_path = os.path.join(result_dir, f'{FACTOR_TO_TEST.__name__}_comprehensive_analysis.png')
+            plt.savefig(save_path)
+            print(f"整合分析图表已保存至: {save_path}")
         else:
             print("错误：未能生成任何分析结果。")
 
