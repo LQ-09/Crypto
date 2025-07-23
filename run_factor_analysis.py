@@ -11,8 +11,8 @@ import matplotlib.gridspec as gridspec
 sns.set_style('whitegrid')
 
 # --- 导入项目模块 ---
-from backtest.utils import load_data_in_period, load_factors_from_config
-from backtest.data_download import fetch_binance_klines_min
+from backtest.utils import load_data_in_period, load_factors_from_config, ensure_data_is_available
+
 
 def run_single_factor_analysis(df, factor_func, period_min, transaction_fee_bps=0, quantile_window=1440, long_quantile=0.10, short_quantile=0.90):
     """
@@ -174,44 +174,6 @@ def plot_multi_period_pnl(pnl_data_by_period, factor_name, ax):
     ax.set_ylabel('Cumulative Return')
     ax.legend()
     ax.grid(True)
-
-def ensure_data_is_available(symbol, start_date_str, end_date_str, data_dir):
-    """
-    检查所需的数据文件是否存在，如果不存在则自动下载。
-    数据按周（周一为一周的开始）进行切分和存储。
-    """
-    print("\n--- 正在检查并确保数据可用性 ---")
-    start_dt = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-    end_dt = datetime.strptime(end_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-
-    # 找到包含开始日期的那一周的周一
-    current_week_start = start_dt - timedelta(days=start_dt.weekday())
-
-    while current_week_start <= end_dt:
-        current_week_end = current_week_start + timedelta(days=7)
-        
-        # 文件名格式: SYMBOL_1min_YYYYMMDD_YYYYMMDD.csv (结束日期为开区间)
-        fname = f"{symbol}_1min_{current_week_start.strftime('%Y%m%d')}_{current_week_end.strftime('%Y%m%d')}.csv"
-        file_path = os.path.join(data_dir, fname)
-
-        if os.path.exists(file_path):
-            pass
-        else:
-            print(f"数据文件不存在，正在下载: {fname}...")
-            try:
-                df_week = fetch_binance_klines_min(symbol, current_week_start, current_week_end)
-                if not df_week.empty:
-                    df_week.to_csv(file_path, index=False)
-                    print(f"已保存: {file_path} ({len(df_week)} 行)")
-                else:
-                    print(f"警告: 未能从币安获取 {current_week_start.date()} 到 {current_week_end.date()} 的数据。将创建一个空文件以避免重复下载。")
-                    # 创建一个空文件，防止下次运行时再次尝试下载无效数据
-                    open(file_path, 'a').close()
-            except Exception as e:
-                print(f"下载数据时发生错误: {e}")
-
-        # 移至下一周
-        current_week_start = current_week_end
 
 # --- 因子原型开发区 (Factor Prototyping Area) ---
 # 在这里定义和测试您当前正在研究的新因子。

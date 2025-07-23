@@ -13,24 +13,28 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min):
     df = df_with_signals.copy()
     fee_rate = fee_bps / 10000.0
     
-    # 1. 按换仓周期进行采样，只在决策点进行交易
-    # 注意：这里的signal已经是shift过的，所以我们直接取每个周期的第一个信号即可
+    # 1. 按换仓周期进行采样
+    # 策略文件生成的signal已经是t-1时刻的信号，决定t时刻的持仓
     backtest_df = df.resample(f'{period_min}T').agg({
         'close': 'first',
         'signal': 'first'
     }).dropna()
     
-    # 强制每个周期开始时平仓：将上一个周期的信号置为0
-    backtest_df['signal'] = backtest_df['signal'].shift(1).fillna(0)
-    
-    # 2. 计算每个持仓周期（小时级）的收益率
+    # 2. 计算每个持仓周期的收益率
     backtest_df['ret'] = backtest_df['close'].pct_change()
-    # 3. 计算策略收益率 (用上一个周期的信号，乘以当前周期的收益)
-    backtest_df['strategy_ret'] = backtest_df['signal'].shift(1) * backtest_df['ret']
     
-    # 4. 计算交易成本 (仅在信号变化时发生)
-    trades = backtest_df['signal'].diff().abs()
-    backtest_df['costs'] = trades * fee_rate
+    # 3. 计算策略毛收益 (信号在策略文件中已经shift(1)，所以这里直接使用)
+    backtest_df['strategy_ret'] = backtest_df['signal'] * backtest_df['ret']
+    
+    # 4. 计算交易成本 (核心修正)
+    # 逻辑：每个周期都必须先平掉上期仓位，再开立本期新仓位。
+    # 上一期的仓位信号
+    prev_signal = backtest_df['signal'].shift(1).fillna(0)
+    # 总交易成本 = 平掉上期仓位的成本 + 开立本期仓位的成本
+    # 例如: 上期为1(多)，本期为-1(空)。交易量为 abs(1)平仓 + abs(-1)开仓 = 2倍仓位
+    # 例如: 上期为1(多)，本期为1(多)。交易量为 abs(1)平仓 + abs(1)开仓 = 2倍仓位
+    total_traded_ratio = prev_signal.abs() + backtest_df['signal'].abs()
+    backtest_df['costs'] = total_traded_ratio * fee_rate
     
     # 5. 计算净收益
     backtest_df['net_strategy_ret'] = backtest_df['strategy_ret'] - backtest_df['costs']
@@ -38,25 +42,36 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min):
     # 6. 计算累计收益曲线
     backtest_df['cumulative_ret'] = (1 + backtest_df['net_strategy_ret'].fillna(0)).cumprod()
     
-    # 7. 计算最终结果
-    # 7.1 总回报
+    # 新增：计算胜率 (Win Rate)
+    # 定义：做多(signal=1)且收益为正，或做空(signal=-1)且收益为负，即为一次获胜的交易。
+    # backtest_df['ret'] 是当前周期的收益率
+    # backtest_df['signal'] 是在当前周期持有的仓位
+    winning_trades = (
+        ((backtest_df['signal'] > 0) & (backtest_df['ret'] > 0)) |
+        ((backtest_df['signal'] < 0) & (backtest_df['ret'] < 0))
+    ).sum()
+    total_trades = (backtest_df['signal'] != 0).sum()
+    win_rate = winning_trades / total_trades if total_trades > 0 else 0
+    
+    # 7. 计算性能指标
     total_return = backtest_df['cumulative_ret'].iloc[-1] - 1
     
-    # 7.2 年化夏普率
+    # 年化夏普率
     periods_per_year = (365 * 24 * 60) / period_min
     sharpe_ratio = 0
     if backtest_df['net_strategy_ret'].std() != 0:
         sharpe_ratio = (backtest_df['net_strategy_ret'].mean() / backtest_df['net_strategy_ret'].std()) * np.sqrt(periods_per_year)
 
-    # 7.3 最大回撤
+    # 最大回撤
     running_max = backtest_df['cumulative_ret'].cummax()
     drawdown = (running_max - backtest_df['cumulative_ret']) / running_max
     max_drawdown = drawdown.max()
     
     results = {
-        'total_return': f"{total_return:.2%}",
-        'annualized_sharpe_ratio': f"{sharpe_ratio:.2f}",
-        'max_drawdown': f"{max_drawdown:.2%}",
+        'total_return': total_return,
+        'annualized_sharpe_ratio': sharpe_ratio,
+        'max_drawdown': max_drawdown,
+        'win_rate': win_rate,
         'cumulative_returns': backtest_df['cumulative_ret'], # 返回序列用于画图
         'backtest_details': backtest_df # 返回详细数据用于进一步分析
     }
