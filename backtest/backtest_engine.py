@@ -28,6 +28,10 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min, leverage
     # 3. 计算策略毛收益 (信号在策略文件中已经shift(1)，所以这里直接使用)
     # 策略收益 = 信号强度 * 资产收益 * 杠杆
     backtest_df['strategy_gross_ret'] = backtest_df['signal'] * backtest_df['period_return'] * leverage
+    # The first observation has no preceding price interval, but entering its
+    # position still incurs a fee. Keep that fee instead of losing it to NaN.
+    if not backtest_df.empty:
+        backtest_df.iloc[0, backtest_df.columns.get_loc('strategy_gross_ret')] = 0.0
     
     # 4. 计算交易成本 (核心逻辑修正)
     # 正确的逻辑：成本只在仓位发生变化时产生，与仓位变化的绝对值成正比。
@@ -66,7 +70,8 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min, leverage
         sharpe_ratio = (backtest_df['net_strategy_ret'].mean() / backtest_df['net_strategy_ret'].std()) * np.sqrt(periods_per_year)
 
     # 最大回撤
-    running_max = backtest_df['cumulative_return_index'].cummax()
+    # Include the pre-trade capital baseline so the entry fee is a drawdown.
+    running_max = backtest_df['cumulative_return_index'].cummax().clip(lower=1.0)
     drawdown = (running_max - backtest_df['cumulative_return_index']) / running_max
     max_drawdown = drawdown.max()
     

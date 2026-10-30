@@ -37,6 +37,20 @@ The project produces exploratory charts and metrics; no validated profitability 
 
 A one-row signal delay does not by itself validate timing after resampling: the position/return alignment needs explicit boundary tests. Funding, slippage, liquidation, market impact, survivorship and out-of-sample robustness are not established. The “win rate” is an active-period statistic, not a closed-trade win rate.
 
+## Offline regression tests
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+The synthetic tests require pandas and NumPy, make no network requests, and
+cover initial long/short entry fees, fractional size and leverage, reversals,
+flat/fee-free paths, single-observation inputs, and the initial-capital drawdown
+baseline. Initial entry fees now reduce equity even though the first row has no
+preceding price return. This is a cost-accounting check, not validation of the
+position/return alignment or evidence of profitability. Saved charts were not
+recomputed.
+
 ## Next steps
 
 Test position/return alignment on tiny deterministic inputs; reconcile fee conventions; add walk-forward evaluation and a frozen dependency environment; save input hashes and parameter manifests; report gross/net returns and cost sensitivity together. These are proposed validations, not demonstrated performance gains.
