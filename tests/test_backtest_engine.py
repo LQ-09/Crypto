@@ -51,5 +51,31 @@ class InitialTransactionCostTests(unittest.TestCase):
         self.assertEqual(result["annualized_sharpe_ratio"], 0)
 
 
+class EmptyBacktestTests(unittest.TestCase):
+    def test_no_usable_observations_raise_clear_error(self):
+        # Empty input, indicator warm-up, and missing prices can all leave
+        # resampling with no usable rows; none should report fabricated metrics.
+        for closes, signals in (([], []), ([100.0, 101.0], [None, None]),
+                                ([None, None], [1.0, 1.0])):
+            with self.subTest(closes=closes, signals=signals):
+                frame = pd.DataFrame(
+                    {"close": closes, "signal": signals},
+                    index=pd.date_range("2025-01-01", periods=len(closes), freq="min"),
+                )
+                original = frame.copy(deep=True)
+                with self.assertRaisesRegex(ValueError, "No usable observations after resampling"):
+                    run_backtest(frame, 1000, 10, 1)
+                pd.testing.assert_frame_equal(frame, original)
+
+    def test_missing_warmup_rows_do_not_reject_valid_observations(self):
+        frame = pd.DataFrame(
+            {"close": [100.0, 100.0], "signal": [None, 1.0]},
+            index=pd.date_range("2025-01-01", periods=2, freq="min"),
+        )
+        result, detail = run_backtest(frame, 1000, 10, 1)
+        self.assertEqual(len(detail), 1)
+        self.assertAlmostEqual(result["equity_curve"].iloc[-1], 999.0)
+
+
 if __name__ == "__main__":
     unittest.main()

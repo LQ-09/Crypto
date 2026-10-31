@@ -10,6 +10,7 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min, leverage
     :param period_min: 换仓周期（分钟）。
     :param leverage: 杠杆/仓位乘数。
     :return: 包含回测结果的字典。
+    :raises ValueError: 重采样后没有同时包含价格与信号的有效观测。
     """
     df = df_with_signals.copy()
     fee_rate = fee_bps / 10000.0
@@ -20,6 +21,10 @@ def run_backtest(df_with_signals, initial_capital, fee_bps, period_min, leverage
         'close': 'first',
         'signal': 'first'
     }).dropna()
+    if backtest_df.empty:
+        raise ValueError(
+            "No usable observations after resampling; provide non-missing close and signal data."
+        )
     
     # 2. 计算每个持仓周期的收益率
     # 重命名为 period_return 以便更清晰地区分，并与 PnL 归因脚本对齐

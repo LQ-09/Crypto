@@ -51,6 +51,11 @@ preceding price return. This is a cost-accounting check, not validation of the
 position/return alignment or evidence of profitability. Saved charts were not
 recomputed.
 
+Empty input or a sample containing no usable prices/signals (for example, an
+all-missing indicator warm-up) raises a descriptive `ValueError` rather than
+returning invented zero-performance metrics. Tests also check that missing
+warm-up rows followed by a valid observation remain accepted.
+
 ## Next steps
 
 Test position/return alignment on tiny deterministic inputs; reconcile fee conventions; add walk-forward evaluation and a frozen dependency environment; save input hashes and parameter manifests; report gross/net returns and cost sensitivity together. These are proposed validations, not demonstrated performance gains.
